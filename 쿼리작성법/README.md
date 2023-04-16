@@ -20,3 +20,6 @@
    - db.schema.object
    - schema 생략 시 ID 사용 
    - SELECT * FROM dbo.A, EXEC dbo.up_Orders
+
+5. 코드에서 임의/매개변수 쿼리의 호출 식별자 달기
+   - 주석에 호출 모듈 설명 달기
