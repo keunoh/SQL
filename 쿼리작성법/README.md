@@ -23,3 +23,12 @@
 
 5. 코드에서 임의/매개변수 쿼리의 호출 식별자 달기
    - 주석에 호출 모듈 설명 달기
+
+6. 의미 오류(Semantic Error)
+   - IS NULL 조건을 지정할 때 이미 NOT NULL 컬럼이거나, PK라면 의미가 없는 조건절
+   - CHECK(Quantity > 0)인 컬럼 상황에서 WHERE Quantity < 0 는 의미 없는 조건걸
+   - SELECT OrderDate, CustomerID FROM dbo.Orders WHERE CustomerID = 'QUICK';
+     - 이미 CustomerID = 'QUICK'라는게 명확하므로 SELECT 절에 쓰지 않는 것이 좋다.
+   - EXISTS 안에 SELECT 절은 옵티마이저의 관심 밖이다. 즉, 관계없음
+   - NOT IN (NULL) -> SubQuery 안의 결과가 한 건이라도 NULL이라면 이 조건은 확인불가가 되어서 외부 쿼리의SELECT 결과가 나오지 않는다.
+   - OUTER JOIN을 할 때 기준테이블을 WHERE 조건절에 적어주어야 한다. OUTER JOIN되는 테이블을 조건절에 적어주면 의미없는 OUTER JOIN이 된다.
