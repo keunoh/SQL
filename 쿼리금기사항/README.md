@@ -12,3 +12,14 @@
       - 조건은 "="이 가장 빠르고 효율적
       - NOT IN은 최후의 보루이므로 다른 방식으로 해결할 수 있는지 파악
     - 인덱스 선두 컬럼은 최대한 "="로 처리한다.
+
+3. Index 열 값 변형
+    - Index 열엔 함수로 가공되지 않도록 구현
+      - SELECT OrderID, OrderDate, CustomerID
+      - FROM dbo.Orders
+      - WHERE Convert(varchar, OrderDate, 112) = '19960704'
+    - 식(expression)의 데이터 형식은 열과 동일한 형식으로 작성해야함
+      - 주요 문제 대상 (암시적 데이터 형 변환)
+        - 문자 vs. 숫자
+        - 문자 vs. 날짜
+        - (var)char vs. n(var)char
