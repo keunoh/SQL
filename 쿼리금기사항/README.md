@@ -23,3 +23,10 @@
         - 문자 vs. 숫자
         - 문자 vs. 날짜
         - (var)char vs. n(var)char
+
+4. 열 간 비교
+    - 열 간 비교되지 않도록 다른 형식으로 구현 (아래와 같이 쓰지 않도록)
+      - SELECT ...
+      - FROM Northwind.dbo.Orders
+      - WHERE OrderID = COALESCE(@OrderID, OrderID)
+      - AND CustomerID = COALESCE(@CustomerID, CustomerID)
