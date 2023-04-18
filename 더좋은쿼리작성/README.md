@@ -13,3 +13,8 @@
      - Sequence Access 동작
      - 연속 값 검색 시 적합    
 
+2. NULL 고려한 집계 연산
+    - 대량 NULL 값을 가진 열의 경우
+      - 불필요한 NULL 데이터를 사전 필터링 한다.
+        - SELECT SUM(TRX_AMT) FROM dbo.MonyTrx
+        - WHERE TRX_AMT IS NOT NULL
