@@ -31,4 +31,15 @@
         - AND t1.col2 = ?
         - AND t2.col1 = ?
         - AND t2.col2 = ?
-        - AND t3.col1 =?
+        - AND t3.col1 
+
+4. Subquery 이해
+    - Join으로 변환 후, Join으로써 처리
+
+5. 성능 좋은 고급 쿼리 적용 예
+    - 중복 I/O 제거 = "같은 데이터는 2번 이상 주복해서 읽지 않는다"
+      - A. JOIN으로 변경
+      - B. 기준 결과 집합 선 처리 후 결합
+      - C. 행 복제
+    - 연산 순서 조정 - 더 나은 순서로 연산처리
+      - Ex. 결합(Join, Subquery) 전 Group 먼저
