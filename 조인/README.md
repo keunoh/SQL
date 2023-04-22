@@ -22,5 +22,5 @@
 3. 조인 연산
     - LEFT OUTER JOIN
     - INNER JOIN
-    - RIGHT OUTER JOINs
+    - RIGHT OUTER JOIN
 ![join.png](join.png)
