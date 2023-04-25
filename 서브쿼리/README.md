@@ -29,3 +29,11 @@
        - 주의사항 
          - Null 값 포함 시 정합성 문제 주의
          - NOT IN (NULL) 값 참조되지 않도록 주의
+
+
+3. CTE(Common Table Expression)(공통 테이블 식)
+    - 기능
+      - 테이블 식(파생테이블 + 뷰 장점)
+      - 재귀(Recursive) CTE
+        - 순환 관계 모델
+        - 일반 재귀 호출
