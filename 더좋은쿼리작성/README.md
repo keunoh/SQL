@@ -43,3 +43,7 @@
       - C. 행 복제
     - 연산 순서 조정 - 더 나은 순서로 연산처리
       - Ex. 결합(Join, Subquery) 전 Group 먼저
+      
+6. Group by 
+   - 예를 들어 두개의 컬럼을 가지고 Group by한다면 중복이 제거된다.
+   

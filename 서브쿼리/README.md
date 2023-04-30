@@ -20,6 +20,7 @@
      - SELECT 절
        - 비교 연산자 (=, <, >, etc.)
        - {ANY | SOME}, ALL
+       - TOP, OFFSET 또는 FOR XML을 함께 지정하지 않으면 뷰, 인라인 함수, 파생 테이블, 하위 쿼리 및 공통 테이블 식에서 ORDER BY 절을 사용할 수 없다.
      - IN ()
        - 비교연산자(=) + 논리연산자(OR) 결합
        - 암시적 Distinct 내포
