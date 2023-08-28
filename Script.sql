@@ -234,8 +234,80 @@ SELECT P.상품코드, P.상품가격, T.거래일자, T.거래수량, T.거래�
  * -> 상품_X01의 인덱스를 [상품분류코드 + 공급업체코드 + 상품가격] 으로 조정 */ 
 
 
+-- 튜닝방안
+SELECT CASE WHEN A.일할계산여부 = 'Y' THEN NVL(A.총청구건수, 0) - NVL(A.청구횟수, 0) ELSE B.할부개월수 - NVL(A.청구횟수, 0) END
+  FROM 서비스별할부 A, 할부계획 B
+ WHERE A.서비스계약번호 = MV.서비스계약번호
+   AND A.할부상태코드 = 'XR'
+--   AND B.할부계획ID(+) = A.할부계획ID   
+   AND B.할부계획ID(+) = (CASE WHEN A.일할계산여부 = 'Y' THEN NULL ELSE A.할부계획ID END)
+   AND ROWNUM <= 1
+ 
+/* 문제점 : 할부계획의 할부개월수(B)는 일할계산여부가 'Y'가 아닐 때만 필요한데, 일할계산여부가 'Y'일때도 조인을 수행하고있음
+ * 튜닝방안 : 서비스별할부의 일할계산여부가 'Y'가 아닐때만 조인하도록 조건절을 아래와 같이 수정  
+ * */
+   
+-- 튜닝방안
+/* [데이터] : 대리점 : 1,000개 , 상품판매실적 : 월평균 100만건
+ * [인덱스] : 대리점_PK : [대리점코드]
+ * 		  : 상품판매실적_PK : [대리점코드 + 상품코드 + 판매일자]
+ * 		  : 상품판매실적_X1 : [판매일자 + 상품코드] 
+ * */
+SELECT A.대리점명, SUM(B.매출금액) 매출금액
+  FROM 대리점 A, 상품판매실적 B
+ WHERE A.대리점코드 = B.대리점코드
+   AND B.상품코드 IN ('A1847', 'Z0413')
+   AND B.판매일자 BETWEEN '20210101' AND '20210331'
+ GROUP BY B.대리점코드, A.대리점명
+ ORDER BY 1, 2
+ 
+SELECT A.대리점명, B.판매금액
+  FROM 대리점 A
+  	 , (SELECT /*+ NO_MERGE */ 대리점코드, SUM(판매금액) 판매금액 
+  	   	  FROM 상품판매실적
+  	   	 WHERE 상품코드 IN ('A1847', 'Z0413')
+  	   	   AND 판매일자 BETWEEN '20210101' AND '20210331'
+  	   	 GROUP BY 대리점코드) B
+ WHERE A.대리점코드 = B.대리점코드;
 
-
+/* SORT GROUP BY
+ *   NESTED LOOPS
+ *     TABLE ACCESS BY INDEX ROWID 상품판매실적
+ *   	 INDEX RANGE SCAN 상품판매실적_X1 (NONUNIQUE)
+ *     TABLE ACCESS BY INDEX ROWID 대리점
+ *       INDEX UNIQUE SCAN 대리점_PK (UNIQUE)
+ * */
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+   
 
 
 
