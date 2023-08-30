@@ -278,18 +278,109 @@ SELECT A.대리점명, B.판매금액
  *       INDEX UNIQUE SCAN 대리점_PK (UNIQUE)
  * */
   
+-- 실행계획
+/* (가입상품과 계약을 해시조인) -> 가입부가상품과 NL 조인 -> 상품과 해시 조인 */
+/*+ leading(b a c d) use_hash(a) use_nl(c) use_hash(d) swap_join_inputs(d)
+ *  index(b 가입상품_X1) index(a 계약_X1) index(c 가입부가상품_PK) index(d 상품_PK) */
+
+/* HASH JOIN
+ *   TABLE ACCESS (BY INDEX ROWID) OF '상품' (TABLE)
+ *     INDEX (RANGE SCAN) OF '상품_PK' (INDEX (UNIQUE))
+ *   NESTED LOOPS
+ *     HASH JOIN
+ *       TABLE ACESS (BY INDEX ROWID) OF '가입상품' (TABLE)
+ *         INDEX (RANGE SCAN) OF '가입상품_X1' (INDEX)
+ *       TABLE ACESS (BY INDEX ROWID) OF '계약' (TABLE)
+ *         INDEX (RANGE SCAN) OF '계약_X1' (INDEX)
+ *     INDEX (RANGE SCAN) OF '가입부가상품_PK' (INDEX (UNIQUE))
+ * */
+
+-- 실행계획
+/* (가임상품과 계약을 해시조인) -> 가입부가상품과 NL 조인 -> 상품과 해시 조인
+ *+ leading(b a c d) use_hash(a) use_nl(c) use_hash(d) no_swap_join_inputs(d) 
+ *  index(b 가입상품_X1) index(a 계약_X1) index(c 가입부가상품_PK) index(d 상품_PK) */
+
+/* HASH JOIN 
+ *   NESTED LOOPS
+ *     HASH JOIN
+ *       TABLE ACCESS (BY INDEX ROWID) OF '가입상품' (TABLE)
+ *         INDEX (RANGE SCAN) OF '가입상품_X1' (INDEX)
+ *       TABLE ACCESS (BY INDEX ROWID) OF '계약' (TABLE)
+ *         INDEX (RANGE SCAN) OF '계약_X1' (INDEX)
+ *     INDEX (RANGE SCAN) OF '가입부가상품_PK' (INDEX (UNIQUE))
+ *   TABLE ACCESS (BY INDEX ROWID) OF '상품' (TABLE)
+ *     INDEX (RANGE SCAN) OF '상품_PK' (INDEX (UNIQUE))
+ * */
   
+-- 스칼라 서브쿼리 실행계획
+SELECT C.고객번호, C.고객명
+	 , (SELECT ROUND(AVG(거래금액), 2) 평균거래금액
+	 	  FROM 거래
+	 	 WHERE 거래일시 >= TRUNC(SYSDATE, 'MM')
+	 	   AND 고객변호 = C.고객번호)
+  FROM 고객 C
+ WHERE C.가입일시 >= TRUNC(ADD_MONTHS(SYSDATE, -1), 'MM');
+
+/* SORT (AGGREGATE)
+ *   TABLE ACCESS (BY INDEX ROWID) OF '거래'
+ *     INDEX (RANGE SCAN) OF '거래_IDX'
+ * TABLE ACCESS (BY INDEX ROWID) OF '고객'
+ *   INDEX (RANGE SCAN) OF '고객_IDX'
+ * */
   
+-- 인라인 뷰 쿼리 튜닝
+/* [인덱스 구성] 
+ * 고객_PK : [고객번호]
+ * 고객_X1 : [가입일시]
+ * 거래_PK : [거래번호]
+ * 거래_X1 : [거래일시]
+ * 거래_X2 : [고객번호 + 거래일시]
+ * */  
+SELECT C.고객번호, C.고객명, T.평균거래, T.최소거래, T.최대거래
+  FROM 고객 C
+  	 , (SELECT 고객번호
+  	 		 , AVG(거래금액) 평균거래
+  	 		 , MIN(거래금액) 최소거래
+  	 		 , MAX(거래금액) 최대거래
+  	 	  FROM 거래
+  	     WHERE 거래일시 >= TRUNC(SYSDATE, 'MM')
+  	     GROUP BY 고객번호
+  	   ) T
+ WHERE C.가입일시 >= TRUNC(ADD_MONTHS(SYSDATE, -1), 'MM')
+   AND C.고객번호 = T.고객번호;
   
-  
-  
-  
-  
-  
-  
-  
-  
-  
+/**
+ * HASH (GROUP BY)
+ *   HASH JOIN
+ *     TABLE ACCESS (FULL) OF '고객' (TABLE)
+ *     TABLE ACCESS (FULL) OF '거래' (TABLE)
+ * */  
+  	 
+-- 튜닝 쿼리 [ 조인 조건 Pushdown 활용(11g 이후) ]
+SELECT /*+ ORDERED USE_NL(T) */
+	   C.고객번호, C.고객명, T.평균거래, T.최소거래, T.최대거래
+  FROM 고객 C
+     , (SELECT /*+ NO_MERGE PUSH_PRED */
+     		   고객번호
+  	 		 , AVG(거래금액) 평균거래
+  	 		 , MIN(거래금액) 최소거래
+  	 		 , MAX(거래금액) 최대거래
+  	 	  FROM 거래
+  	     WHERE 거래일시 >= TRUNC(SYSDATE, 'MM')
+  	     GROUP BY 고객번호
+  	   ) T
+ WHERE C.가입일시 >= TRUNC(ADD_MONTHS(SYSDATE, -1), 'MM')
+   AND C.고객번호 = T.고객번호;
+
+/** NESTED LOOPS
+ *    TABLE ACCESS (BY INDEX ROWID BATCHED) OF '고객' (TABLE)
+ *      INDEX (RANGE SCAN) OF '고객_X1' (INDEX)
+ *    VIEW PUSHED PREDICATE
+ *      SORT (GROUP BY)
+ *        TABLE ACCESS (BY INDEX ROWID BATCHED) OF '거래' (TABLE)
+ *          INDEX (RANGE SCAN) OF '거래_X2' (INDEX)
+ * */
+ 
   
   
   
