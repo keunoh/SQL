@@ -381,14 +381,113 @@ SELECT /*+ ORDERED USE_NL(T) */
  *          INDEX (RANGE SCAN) OF '거래_X2' (INDEX)
  * */
  
-  
-  
-  
-  
-  
-  
-  
-  
+----------------------- 조인튜닝 47번 ------------------------------
+/** [ 인덱스 구성 ]
+ *  상품_PK : [상품코드]
+ *  주문상품_PK : [고객번호 + 상품코드 + 주문일시]
+ *  주문상품_X1 : [주문일시 + 할인유형코드]
+ * */
+/** [ 테이블 구성 및 데이터 ]
+ * - 주문상품은 비파티션 테이블
+ * - 한 달 주문상품 = 100만 건
+ * - 주문상품의 보관기간 = 10년
+ * - 주문상품 총 건수 = 총 1억 2천만 건(= 100만 * 120개월)
+ * - 할인유형코드 조건을 만족하는 데이터 비중 = 20%
+ * - 등록된 상품 = 2만 개
+ * - 2만 개 상품을 고르게 주문
+ * */
+SELECT P.상품코드, MIN(P.상품명) 상품명, MIN(P.상품가격) 상품가격
+	 , SUM(O.주문수량) 총주문수량, SUM(O.주문금액) 총주문금액
+  FROM 주문상품 O, 상품 P
+ WHERE O.상품코드 = P.상품코드
+   AND O.할인유형코드 = 'K890'
+   AND O.주문일시 >= ADD_MONTHS(SYSDATE, -1)
+ GROUP BY P.상품코드
+ ORDER BY 총추문금액 DESC, 상품코드
+
+/** SORT (ORDER BY)
+ *    HASH (GROUP BY)
+ *      NESTED LOOPS
+ *        NESTED LOOPS
+ *    		TABLE ACCESS (BY INDEX ROWID) OF '주문상품' (TABLE)
+ * 			  INDEX (RANGE SCAN) OF '주문상품_X1' (INDEX)
+ * 			INDEX (UNIQUE SCAN) OF '상품_PK' (INDEX (UNIQUE))
+ * 		  TABLE ACCESS (BY INDEX ROWID) OF '상품' (TABLE) 
+ * */
+
+-- [내 답안]
+-- 1. 주문상품_X1 인덱스를 수정하고싶다. 
+---- 주문상품_X1 : [주문일시 + 할인유형코드]  --> [할인유형코드 + 주문일시] 로 수정
+-- 2. HASH GROUP BY를 제거하고 싶다. 
+SELECT /*+ LEADING (O P) USE_NL(P) */
+	   P.상품코드, P.상품명, P.상품가격, O.주문수량, O.총주문금액
+  FROM (SELECT /*+ NO_UNNEST INDEX(주문상품 주문상품_X1) */
+  			   상품코드, SUM(주문수량) 주문수량, SUM(주문금액) 총주문금액
+  		  FROM 주문상품
+  		 WHERE 할인유형코드 = 'K890'
+  		   AND 주문일시 >= ADD_MONTHS(SYSDATE, -1)
+  		 GROUP BY 상품코드
+  ) O, 상품 P
+ WHERE O.상품코드 = P.상품코드
+ ORDER BY O.총주문금액 DESC
+ 
+/** [SQL - 1안] 해설 
+ * 상품은 2만 개, SQL에서 사용된 컬럼도 3개뿐.
+ * 상품 데이터를 PGA에 충분히 담을 수 있고, 2만 개 상품을 고르게 주문하므로 불필요한 상품을 PGA에 적재하는 비효율도 없다.
+ * 따라서 20만개 주문상품 기준으로 NL 조인으로 버퍼 캐시를 탐색하는 것 보다 해시 조인을 PGA를 탐색하는 것이 훨씬 효과적 
+ * */  
+
+-- [SQL - 1안]
+SELECT /*+ LEADING(P) USE_HASH(O) INDEX(O 주문상품_X1) FULL(P) */
+	   P.상품코드, MIN(P.상품명) 상품명, MIN(P.상품가격) 상품가격
+	 , SUM(O.주문수량) 총주문수량, SUM(O.주문금액) 총주문금액
+  FROM 주문상품 O, 상품 P
+ WHERE O.상품코드 = P.상품코드
+   AND O.할인유형코드 = 'K890'
+   AND O.주문일시 >= ADD_MONTHS(SYSDATE, -1)
+ GROUP BY P.상품코드
+ ORDER BY 총추문금액 DESC, 상품코드
+ 
+/** SORT (ORDER BY)
+ *    HASH (GROUP BY)
+ *      HASH JOIN
+ *        TABLE ACCESS (FULL) OF '상품' (TABLE)
+ *        TABLE ACCESS (BY INDEX ROWID) OF '주문상품' (TABLE)
+ *          INDEX (RANGE SCAN) OF '주문상품_X1' (INDEX)
+ * */
+
+/** 2안 해설
+ * 2만 개상품을 고르게 주문하므로 GROUP BY 결과 집합은 2만여건이다. 상품코드당 주문상품은 평균 10건이므로
+ * 이 방식으로 처리하면 조인 횟수를 1/10로 줄일 수 있다. GROUP BY 추가 수행에 따른 부담을 상쇄하고도 남는다.
+ * 조인 횟수가 줄고 같은 상품코드로 여러 번 조인하지도 않으므로 NL 조인의 부담이 줄지만, 여기서도 해시 조인이 더 빠르고 
+ * 효과적이다. 상품 데이터를 PGA에 충분히 담을 수 있을 뿐만 아니라 2만 개 상품을 고르게 주문하므로 불필요한 상품을 PGA에 적재하는 비효율도 없기 때문이다.
+ * 해시 조인은 출력 순서를 보장하지 않으므로 ORDER BY는 맨 마지막에 기술해야 한다. ORDER BY가 없는 인라인 뷰는 옵티마이저에 의해 Merging 될 수 있으므로
+ * 정확히 아래 실행계획이 나오게 하려면 NO_MERGE 힌트가 필요하다.
+ * */  
+
+-- [SQL - 2안]
+SELECT /*+ LEADING(O) USE_HASH(P) FULL(P) */
+	   P.상품코드, P.상품명, P.상품가격, O.총주문수량, O.총주문금액
+  FROM ( 
+  	SELECT /*+ INDEX(A 주문상품_X1) NO_MERGE */ 
+  		   상품코드, SUM(주문수량) 총주문수량, SUM(주문금액) 총주문금액
+  	  FROM 주문상품 A
+  	 WHERE 주문일시 >= ADD_MONTHS(SYSDATE, -1)
+  	   AND 할인유형코드 = 'K890'
+  	 GROUP BY 상품코드) O
+  	 , 상품 P
+ WHERE O.상품코드 = P.상품코드
+ ORDER BY 총주문금액 DESC, 상품코드
+ 
+/** SORT (ORDER BY)
+ *    HASH JOIN
+ *      VIEW
+ *        HASH (GROUP BY)
+ *          PARTITION RANGE (ITERATOR)
+ *        	  TABLE ACCESS (FULL) OF '주문상품' (TABLE)
+ *      TABLE ACCESS (FULL) OF '상품' (TABLE)
+ * */
+-------------------------------------------------------------------------  
   
   
   
