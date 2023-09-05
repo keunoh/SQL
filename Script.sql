@@ -573,13 +573,109 @@ SELECT /*+ LEADING(O) USE_HASH(P) FULL(P) */
  * */
 -------------------------------------------------------------------------
 
+--------------------------- 조인튜닝 49번 ----------------------------------  
+/** [ 인덱스 구성 ]
+ *  상품_PK : [상품코드]
+ *  주문상품_PK : [고객번호 + 상품코드 + 주문일시]
+ *  주문상품_X1 : [주문일시 + 할인유형코드]
+ * */
+/** [ 테이블 구성 및 데이터 ]
+ * - 주문상품은 월 단위 파티션 테이블(주문일시 기준)
+ * - 한 달 주문상품 = 100만 건
+ * - 주문상품의 보관기간 = 10년
+ * - 주문상품 총 건수 = 총 1억 2천만 건(= 100만 * 120개월)
+ * - 할인유형코드 조건을 만족하는 데이터 비중 = 20%
+ * - 등록된 상품 = 2만 개
+ * - 할인유형코드 = 'K890' 조건으로 판매되는 상품은 100여개
+ * */  
+SELECT P.상품코드, MIN(P.상품명) 상품명, MIN(P.상품가격) 상품가격
+	 , SUM(O.주문수량) 총주문수량, SUM(O.주문금액) 총주문금액
+  FROM 주문상품 O, 상품 P
+ WHERE O.상품코드 = P.상품코드
+   AND O.주문일시 >= ADD_MONTHS(SYSDATE, -1)
+   AND O.할인유형코드 = 'K890'
+ GROUP BY P.상품코드
+ ORDER BY 총주문금액 DESC, 상품코드
 
+/** SORT (ORDER BY)
+ *    HASH (GROUP BY)
+ *      NESTED LOOPS
+ * 		  NESTED LOOPS
+ * 		    PARTITION RANGE (ITERATOR)
+ * 			  TABLE ACCESS (BY LOCAL INDEX ROWID) OF '주문상품' (TABLE)
+ * 				INDEX (RANGE SCAN) OF '주문상품_X1' (INDEX)
+ * 			INDEX (UNIQUE SCAN) OF '상품_PK' (INDEX (UNIQUE))
+ * 		  TABLE ACCESS (BY INDEX ROWID) OF '상품' (TABLE)
+ * */
 
+-- 내 답안 
+-- 1. 할인유형코드 조건으로 판매되는 상품이 100여 개 밖에 안 되니까, 스칼라 서브쿼리로 조회하는게 더 낫지 않을까?
+SELECT O.상품코드
+	 , (SELECT P.상품명 FROM 상품 P WHERE O.상품코드 = P.상품코드) 상품명
+	 , (SELECT P.상품가격 FROM 상품 P WHERE O.상품코드 = P.상품코드) 상품가격
+	 , SUM(O.주문수량) 총주문수량, SUM(O.주문금액) 총주문금액
+  FROM 주문상품 O
+ WHERE O.주문일시 >= ADD_MONTHS(SYSDATE, -1)
+   AND O.할인유형코드 = 'K890'
+ GROUP BY O.상품코드
+ ORDER BY 총주문금액 DESC, 상품코드
 
-
-
-
-
-
-
-
+/** [실행계획] 해설 
+ * 한 달 주문상품 100만 건 중 할인유형코드 = 'K890' 조건을 만족하는 데이터는 20만 건이다.
+ * 주문상품은 월 단위 파티션 테이블이므로 인덱스로 20만 건을 랜덤 액세스하는 것보다 Full Scan이 유리하다.
+ * 2만 개 상품 중 할인유형코드 = 'K890' 조건으로 판매되는 상품은 100여 개이므로 GROUP BY 결과 집합도 100여 건이다.
+ * 상품당 주문상품은 평균 2,000건(=20만 개 주문상품 / 100개 상품)이므로 모범답안처럼 GROUP BY를 먼저 처리하면 조인횟수가 많이 감소한다.
+ * */  
+ 
+/** SORT (ORDER BY)
+ *    NESTED LOOPS
+ * 	    NESTED LOOPS
+ * 		  VIEW
+ * 			HASH (GROUP BY)
+ * 			  PARTITION RANGE (ITERATOR)
+ * 			    TABLE ACCESS (FULL) OF '주문상품' (TABLE)
+ * 		  INDEX (UNIQUE SCAN) OF '상품_PK' (INDEX (UNIQUE))
+ * 		TABLE ACCESS (BY INDEX ROWID) OF '상품' (TABLE)
+ * */ 
+SELECT /*+ LEADING(O) USE_NL(P) */
+	   P.상품코드, P.상품명, P.상품가격, O.총주문수량, O.총주문금액
+  FROM (
+  	SELECT /*+ FULL(A) NO_MERGE */
+  		   상품코드, SUM(주문수량) 총주문수량, SUM(주문금액) 총주문금액
+  	  FROM 주문상품 A
+  	 WHERE 주문일시 >= ADD_MONTHS(SYSDATE, -1)
+  	   AND 할인유형코드 = 'K890'
+  	 GROUP BY 상품코드 
+	) O, 상품 P
+ WHERE O.상품코드 = P.상품코드
+ ORDER BY 총주문금액 DESC, 상품코드
+	
+/** [SQL] 해설
+ * GROUP BY 결과 집합은 100건이고 상품은 2만 개이므로 해시 조인보다 NL 조인이 효과적이다.
+ * 조인 기준 집합이 소량이고, 같은 상품코드로 여러 번 조인하지도 않기 때문이다.
+ * 오히려 해시조인으로 처리하면, 할인유형코드 = 'K890' 조건으로 판매되는 상품이 100여 개 뿐인데 2만 개 상품을 모두 PGA에 적재하는 비효율이 있다.
+ * (배치 I/O가 작동하지 않는 한) NL 조인은 출력 순서를 보장하지만, 전체범위 처리이므로 굳이 ORDER BY를 인라인 뷰에서 처리할 이유가 없다.
+ * ORDER BY가 없는 인라인 뷰는 옵티마이저에 의해 Merging 될 수 있으므로 정확히 위 실행계획이 나오게 하려면 NO_MERGE 힌트가 필요하다.
+ * */
+------------------------------------------------------------------------- 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
