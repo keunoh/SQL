@@ -659,6 +659,234 @@ SELECT /*+ LEADING(O) USE_NL(P) */
  * */
 ------------------------------------------------------------------------- 
  
+--------------------------- 조인튜닝 50번 ----------------------------------  
+/** [ 인덱스 구성 ]
+ *  상품_PK : [상품코드]
+ *  주문상품_PK : [고객번호 + 상품코드 + 주문일시]
+ *  주문상품_X1 : [주문일시 + 할인유형코드]
+ * */
+/** [ 테이블 구성 및 데이터 ]
+ * - 주문상품은 월 단위 파티션 테이블(주문일시 기준)
+ * - 한 달 주문상품 = 100만 건
+ * - 주문상품의 보관기간 = 10년
+ * - 주문상품 총 건수 = 총 1억 2천만 건(= 100만 * 120개월)
+ * - 할인유형코드 조건을 만족하는 데이터 비중 = 20%
+ * - 등록된 상품 = 2만 개
+ * - 대부분 상품을 한 달에 한 개 이상 주문
+ * */  
+SELECT 상품코드, 상품명, 상품가격, 총주문수량, 총주문금액
+  FROM (
+  	SELECT P.상품코드
+  		 , MIN(P.상품명) 상품명, MIN(P.상품가격) 상품가격
+  		 , SUM(O.주문수량) 총주문수량, SUM(O.주문금액) 총주문금액
+  	  FROM 주문상품 O
+  	     , 상품 P
+  	 WHERE O.주문상품 = P.주문상품
+  	   AND O.주문일시 >= ADD_MONTHS(SYSDATE, -1)
+  	   AND O.할인유형코드 = 'K890'
+  	 GROUP BY P.상품코드
+  	 ORDER BY 총주문금액 DESC, 상품코드
+  )
+ WHERE ROWNUM <= 100
+ 
+/** COUNT (STOPKEY)
+ *    VIEW
+ * 	    SORT (ORDER BY STOPKEY)
+ * 		  HASH (GROUP BY)
+ * 			NESTED LOOPS
+ * 			  NESTED LOOPS
+ * 				PARTITION RANGE (ITERATOR) 
+ * 				  TABLE ACCESS (BY LOCAL INDEX ROWID) OF '주문상품' (TABLE)
+ * 					INDEX (RANGE SCAN) OF '주문상품_X1' (INDEX)
+ * 				INDEX (UNIQUE SCAN) OF '상품_PK' (INDEX (UNIQUE))
+ * 			  TABLE ACCESS (BY INDEX ROWID) OF '상품' (TABLE) 
+ * */ 
+ 
+-- 내 답안
+-- 최상위 100건만 뽑아오고 싶다면, Full scan 보다 Index range scan이 더 효율적이지 않을까?
+-- 그리고 Hash group by -> 순서가 무작위로 추출되니까 그냥 그룹바이로 변환해주고 싶은데..
+SELECT 상품코드, 상품명, 상품가격, 총주문수량, 총주문금액
+  FROM (
+  	SELECT /*+ LEADING(O) USE_NL(P) INDEX(O 주문상품_X1) */
+  		   P.상품코드
+  		 , MIN(P.상품명) 상품명, MIN(P.상품가격) 상품가격
+  		 , SUM(O.주문수량) 총주문수량, SUM(O.주문금액) 총주문금액
+  	  FROM 주문상품 O
+  	     , 상품 P
+  	 WHERE O.주문상품 = P.주문상품
+  	   AND O.주문일시 >= ADD_MONTHS(SYSDATE, -1)
+  	   AND O.할인유형코드 = 'K890'
+  	 GROUP BY P.상품코드
+  	 ORDER BY 총주문금액 DESC, 상품코드
+  )
+ WHERE ROWNUM <= 100
+ 
+/** [실행계획 - 1안 ] 해설 
+ * 한 달 주문상품 100만 건 중 할인유형코드 = 'K890' 조건을 만족하는 데이터는 20만 건이다.
+ * 주문상품은 월 단위 파티션 테이블이므로 인덱스로 20만 건을 랜덤 액세스하는 것보다 Full Scan이 유리하다.
+ * 2만 개 상품을 한 달에 한 개 이상 주문하므로 GROUP BY 결과 집합은 2만여 건이다.
+ * 상품코드당 주문상품은 평균 10건이므로 모범답안 1안처럼 GROUP BY 후 조인하면 조인 횟수를 1/10으로 줄일 수 있다.
+ * */  
+ 
+/** SORT (ORDER BY)
+ *    COUNT (STOPKEY)
+ * 		NESTED LOOPS
+ * 		  NESTED LOOPS
+ * 			VIEW
+ * 			  SORT (ORDER BY)
+ * 				HASH (GROUP BY)
+ * 				  PARTITION RANGE (ITERATOR)
+ * 					TABLE ACCESS (FULL) OF '주문상품' (TABLE)
+ * 			INDEX (UNIQUE SCAN) OF '상품_PK' (INDEX (UNIQUE))
+ * 		  TABLE ACCESS (BY INDEX ROWID) OF '상품' (TABLE)
+ * */ 
+ 
+-- [ SQL - 1안 ]
+SELECT /*+ LEADING(O) USE_NL(P) */
+	   P.상품코드, P.상품명, P.상품가격, O.총주문수량, O.총주문금액
+  FROM (
+  	SELECT /*+ FULL(A) */
+  	  	   상품코드, SUM(주문수량) 총주문수량, SUM(주문금액) 총주문금액
+  	  FROM 주문상품 A
+  	 WHERE 주문일시 >= ADD_MONTHS(SYSDATE, -1)
+  	   AND 할인유형코드 = 'K890'
+  	 GROUP BY 상품코드
+  	 ORDER BY 총주문금액 DESC, 상품코드
+  ) O, 상품 P
+ WHERE O.상품코드 = P.상품코드
+   AND ROWNUM <= 100
+ ORDER BY 총주문금액 DESC, 상품코드
+ 
+/** [실행계획 - 2안 ] 해설 
+ * 총주문금액 내림차순, 상품코드 오름차순으로 정렬한 2만여 개 결과집합 중 상위 100개만 추출해야하므로 ORDER BY는 인라인 뷰 안에 기술해야 한다.
+ * 등록된 2만 개 상품 중 100개만 조인하므로 해시 조인보다 NL 조인이 효과적이다.
+ * ORDER BY가 있고 바깥에 ROWNUM을 사용한 인라인 뷰는 Merging 될 수 없으므로 NO_MERGE 힌트는 불필요하다.
+ * 인라인 뷰에서 정렬한 결과집합 중 100건을 추출했는데 NL 조인 과정에 배치 I/O가 작동하면 출력 순서가 흐트러질 수 있으므로 정렬 기준을 바깥에 한 번 더 명시해야한다.
+ * 인라인 뷰 바깥에 ORDER BY를 한 번 더 기술하지 않으려면 모범답안 2안처럼 NO_NLJ_BATCHING 힌트를 추가하면 된다.
+ * */   
+ 
+-- [ SQL - 2안 ]
+SELECT /*+ LEADING(O) USE_NL(P) NO_NLJ_BATCHING(P) */
+	   P.상품코드, P.상품명, P.상품가격, O.총주문수량, O.총주문금액
+  FROM (
+  	SELECT /*+ FULL(A) */
+  	  	   상품코드, SUM(주문수량) 총주문수량, SUM(주문금액) 총주문금액
+  	  FROM 주문상품 A
+  	 WHERE 주문일시 >= ADD_MONTHS(SYSDATE, -1)
+  	   AND 할인유형코드 = 'K890'
+  	 GROUP BY 상품코드
+  	 ORDER BY 총주문금액 DESC, 상품코드
+  ) O, 상품 P
+ WHERE O.상품코드 = P.상품코드
+   AND ROWNUM <= 100
+------------------------------------------------------------------------- 
+ 
+--------------------------- 조인튜닝 51번 ---------------------------------- 
+-- 결과집합을 일부(보통 상위100개)만 출력하고 멈추는 애플리케이션 환경
+/** [ 인덱스 구성 ]
+ *  상품_PK : [상품코드]
+ *  주문상품_PK : [고객번호 + 상품코드 + 주문일시]
+ *  주문상품_X1 : [주문일시 + 할인유형코드]
+ * */
+/** [ 테이블 구성 및 데이터 ]
+ * - 주문상품은 비파티션 테이블
+ * - 한 달 주문상품 = 100만 건
+ * - 주문상품의 보관기간 = 10년
+ * - 주문상품 총 건수 = 총 1억 2천만 건(= 100만 * 120개월)
+ * - 할인유형코드 조건을 만족하는 데이터 비중 = 10%
+ * - 등록된 상품 = 50만 개 / 속성 = 500개
+ * - 대부분 상품을 한 달에 한 개 이상 주문
+ * */
+
+SELECT P.상품코드, MIN(P.상품명) 상품명, MIN(P.등록일시) 등록일시
+	 , MIN(P.상품가격) 상품가격, MIN(P.공급자ID) 공급자ID
+	 , SUM(O.주문수량) 총주문수량, SUM(O.주문금액) 총주문금액
+  FROM 주문상품 O
+  	 , 상품 P
+ WHERE O.상품코드 = P.상품코드
+   AND O.주문일시 >= ADD_MONTHS(SYSDATE, -1)
+   AND O.할인유형코드 = 'K890'
+ GROUP BY P.상품코드
+ ORDER BY 등록일시 DESC 
+ 
+/** SORT (ORDER BY)
+ *    HASH (GROUP BY)
+ *   	NESTED LOOPS
+ * 		  NESTED LOOPS
+ * 		    TABLE ACCESS (BY INDEX ROWID) OF '주문상품' (TABLE)
+ * 			  INDEX (RANGE SCAN) OF '주문상품_X1' (INDEX)
+ * 			INDEX (UNIQUE SCAN) OF '상품_PK' (INDEX (UNIQUE))
+ * 		  TABLE ACCESS (BY INDEX ROWID) OF '상품' (TABLE)
+ * */ 
+ 
+/** 내 답안
+* 등록된 상품이 너무 많다. -> 너무 많은 조인이 일어나겠다.
+* 할인유형코드 조건을 만족하는 비중이 10%니까 원하는 데이터는 10만 건이 조회될 것이다.
+* 비파티션 테이블이므로 10만건 빠르게 조회해도록 NDV가 좋은 할인유형코드를 선두컬럼으로 하는 인덱스를 생성해주자. -> 주문상품_X1 = [할인유형코드 + 주문일시]
+* 인라인뷰 10만건만 먼저 조회하고 상품테이블과 NL 조인 유도한다.
+* SORT (ORDER BY) 제거 하기 위해 인덱스 추가 -> 상품_X1 = [상품코드 + 등록일시]
+* */
+SELECT /*+ LEADING(O) USE_NL(P) INDEX(P 상품_X1) */
+	   P.상품코드, P.상품명, P.등록일시, P.상품가격, P.공급자ID
+	 , O.총주문수량, O.총주문금액  
+  FROM (
+  	SELECT /*+ INDEX(주문상품 주문상품_X1) NO_MERGE  */
+  		   상품코드, SUM(주문수량) 총주문수량, SUM(주문금액) 총주문금액
+  	  FROM 주문상품 
+  	 WHERE 주문일시 >= ADD_MONTHS(SYSDATE, -1)
+  	   AND 할인유형코드 = 'K890'
+  	 GROUP BY 상품코드
+  ) O, 상품 P
+ WHERE O.상품코드 = P.상품코드
+ ORDER BY 등록일시 DESC
+ 
+/** [ 실행계획 ] 해설 
+ * 결과집합을 일부만 출력하고 멈춘다는 건 부분범위 처리 기능함을 의미한다.
+ * 부분범위 처리를 활용하려면 소트 연산을 생략할 수 있어야 한다.
+ * 소트 연산을 생략하고 상품 등록일시 역순으로 정렬된 결과집합을 빠르게 출력하려면, 등록일시가 선두인 상품 인덱스를 역순으로 스캔하면서 주문상품 GROUP BY 집합과 NL 조인하면 된다.
+ * 단, 반드시 Join Predicate Pushdown 기능이 작동해야 한다.
+ * 따라서 튜닝 의도대로 정확히 실행되게 하려면 NO_MERE와 PUSH_PRED 힌틀르 사용해야 한다.
+ * */   
+ 
+/** NESTED LOOPS
+ *    TABLE ACCESS (BY INDEX ROWID) OF '상품' (TABLE)
+ * 		INDEX (FULL SCAN DESCENDING) OF '상품_X1' (INDEX)
+ * 	  VIEW PUSHED PREDICATE
+ * 		FILTER
+ * 		  SORT (AGGREGATE)
+ * 			TABLE ACCESS (BY INDEX ROWID) OF '주문상품' (TABLE)
+ * 			  INDEX (RAGNE SCAN) OF '주문상품_X2' (INDEX)
+ * */ 
+ 
+-- 모범답안 - [ SQL ]
+SELECT /*+ LEADING(P) USE_NL(O) INDEX_DESC(P 상품_X1) */
+  	   P.상품코드, P.상품명, P.등록일시, P.상품가격, P.공급자ID
+	 , O.총주문수량, O.총주문금액  
+  FROM (
+  	SELECT /*+ NO_MERGE PUSH_PRED INDEX(A 주문상품_X2) */
+  		   상품코드, SUM(주문수량) 총주문수량, SUM(주문금액) 총주문금액
+  	  FROM 주문상품 A
+  	 WHERE 주문일시 >= ADD_MONTHS(SYSDATE, -1)
+  	   AND 할인유형코드 = 'K890'
+  	 GROUP BY 상품코드
+  ) O, 상품 P
+ WHERE O.상품코드 = P.상품코드
+ ORDER BY P.등록일시 DESC
+ 
+/** [ 인덱스 재구성 ]
+ * 상품_X1 : [ 등록일시 ]
+ * 주문상품_X2 : [ 할인유형코드 + 상품코드 + 주문일시 ] 또는 [ 상품코드 + 할인유형코드 + 주문일시 ]
+ * */ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
  
  
  
