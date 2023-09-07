@@ -877,16 +877,185 @@ SELECT /*+ LEADING(P) USE_NL(O) INDEX_DESC(P 상품_X1) */
  * 상품_X1 : [ 등록일시 ]
  * 주문상품_X2 : [ 할인유형코드 + 상품코드 + 주문일시 ] 또는 [ 상품코드 + 할인유형코드 + 주문일시 ]
  * */ 
+------------------------------------------------------------------------- 
  
+--------------------------- 조인튜닝 52번 ----------------------------------  
+-- 결과집합을 일부(보통 상위100개)만 출력하고 멈추는 애플리케이션 환경
+/** [ 인덱스 구성 ]
+ *  상품_PK : [상품코드]
+ *  주문상품_PK : [고객번호 + 상품코드 + 주문일시]
+ *  주문상품_X1 : [주문일시 + 할인유형코드]
+ * */
+/** [ 테이블 구성 및 데이터 ]
+ * - 주문상품은 월 단위 파티션 테이블(주문일시 기준)
+ * - 한 달 주문상품 = 100만 건
+ * - 주문상품의 보관기간 = 10년
+ * - 주문상품 총 건수 = 총 1억 2천만 건(= 100만 * 120개월)
+ * - 할인유형코드 조건을 만족하는 데이터 비중 = 10%
+ * - 등록된 상품 = 50만 개 / 속성 = 500개
+ * - 할인유형코드 = 'K890' 조건으로 판매되는 상품은 5,000개
+ * */ 
+
+SELECT P.상품코드, MIN(P.상품명) 상품명, MIN(P.등록일시) 등록일시
+	 , MIN(P.상품가격) 상품가격, MIN(P.공급자ID) 공급자ID
+	 , SUM(O.주문수량) 총주문수량, SUM(O.주문금액) 총주문금액
+  FROM 주문상품 O
+     , 상품 P
+ WHERE O.상품코드 = P.상품코드
+   AND O.주문일시 >= ADD_MONTHS(SYSDATE, -1)
+   AND O.할인유형코드 = 'K890'
+ GROUP BY P.상품코드
+ ORDER BY 등록일시 DESC
  
+/** SORT (ORDER BY)
+ * 	  HASH (GROUP BY)
+ * 		NESTED LOOPS
+ * 		  NESTED LOOPS
+ * 			PARTITION RANGE (ITERATOR)
+ * 			  TABLE ACCESS (BY LOCAL INDEX ROWID) OF '주문상품' (TABLE)
+ * 				INDEX (RANGE SCAN) OF '주문상품_X1' (INDEX)
+ * 			INDEX (UNIQUE SCAN) OF '상품_PK' (INDEX (UNIQUE))
+ * 		  TABLE ACCESS (BY INDEX ROWID) OF '상품' (TABLE)
+ * */
  
+/** 내 답안
+ * 파티션 테이블이므로 FULL SCAN 유도
+ * 인라인뷰에서 GROUP BY 먼저 수행 후 조인 유도
+ * 인라인뷰 안에 ORDER BY절이 없으므로 뷰 머징 방지
+ * 부분범위처리 가능하므로 SORT연산 없애주기 위해 인덱스 생성 -> 상품_X1 : [ 등록일시 ]
+ * */
+
+SELECT /*+ LEADING(O) USE_NL(P) INDEX(P 상품_X1) */
+	   P.상품코드, P.상품명, P.등록일시, P.상품가격, P.공급자ID
+	 , O.총주문수량, O.총주문금액
+  FROM (
+  	SELECT /*+ FULL(A) NO_MERGE */
+  		   상품코드, SUM(주문수량) 총주문수량, SUM(주문금액) 총주문금액
+  	  FROM 주문상품 A
+  	 WHERE 주문일시 >= ADD_MONTHS(SYSDATE, -1)
+  	   AND 할인유형코드 = 'K890'
+  	 GROUP BY 상품코드
+  ) O, 상품 P
+ WHERE O.상품코드 = P.상품코드
+ ORDER BY 등록일시 DESC;
  
+/** 해설 
+ * 부분범위 처리를 활용하려면 상품의 등록일시 인덱스를 역순으로 스캔하면서 주문상품 GROUP BY 집합을 Join Predicate Pushdown 방식으로 NL 조인해야한다.
+ * */ 
+SELECT /*+ LEADING(P) USE_NL(O) INDEX_DESC(P (등록일시)) */
+	   P.상품코드, P.상품명, P.등록일시, P.상품가격, P.공급자ID
+	 , O.총주문수량, O.총주문금액
+  FROM (
+  	SELECT /*+ NO_MERGE PUSH_PRED INDEX(A) */
+  		   상품코드, SUM(주문수량) 총주문수량, SUM(주문금액) 총주문금액
+  	  FROM 주문상품 A
+  	 WHERE 주문일시 >= ADD_MONTHS(SYSDATE, -1)
+  	   AND 할인유형코드 = 'K890'
+  	 GROUP BY 상품코드
+  ) O, 상품 P
+ WHERE O.상품코드 = P.상품코드
+ ORDER BY 등록일시 DESC
+/**문제는 상품 기준으로 주문상품과 조인하면 첫 번째 Fetch Call을 위한 Array를 채우기까지 상당히 많은 데이터를 읽어야 한다는 데 있다.
+ * 할인유형코드 = 'K890' 조건으로 판매되는 상품은 5,000개이므로 나머지 495,000개는 조인에 실패하기 때문이다.
+ * 상위 100개 상품을 출력하려면 대략 10,000개 상품을 스캔하면서 주문상품과 조인하고 조건절을 필터링해야하므로 빠른 응답속도를 얻기 힘들다.
+ * 반면, 정렬 기준이 상품의 등록일시인 상황에서 아래처럼 주문상품을 먼저 읽어서 GROUP BY하면 조인까지 모두 마쳐야 출력을 시작할 수 있다.
+ * 즉, 부분범위 처리의 이점을 전혀 활용하지 못 한다.
+ * */
+SELECT /*+ LEADING(O) USE_NL(P) */
+	   P.상품코드, P.상품명, P.등록일시, P.상품가격, P.공급자ID
+	 , O.총주문수량, O.총주문금액
+  FROM (
+  	SELECT /*+ NO_MERGE */
+  		   상품코드, SUM(주문수량) 총주문수량, SUM(주문금액) 총주문금액
+  	  FROM 주문상품 A
+  	 WHERE 주문일시 >= ADD_MONTHS(SYSDATE, -1)
+  	   AND 할인유형코드 = 'K890'
+  	 GROUP BY 상품코드
+  ) O, 상품 P
+ WHERE O.상품코드 = P.상품코드
+ ORDER BY 등록일시 DESC
+/**20만 개 상품 중 할인유형코드 = 'K890' 조건으로 판매되는 상품은 5,000개이므로 GROUP BY 결과 집합도 5,000건이다.
+ * GROUP BY 후 NL 조인하면 50만 개 중 5,000개 상품만 인덱스로 읽어서 조인하면 되지만, NL 조인의 특성상 느리다.
+ * 반면, GROUP BY 후 해시 조인하면, 50만 개 상품을 "모두" 해시 맵에 올린 후 해시 맵을 5,000번 탐색한다.
+ * PGA에서 탐색하므로 조인 과정의 성능은 해시 조인이 우세하겠지만, 상품 테이블에 컬럼이 많으므로 해시 맵을 생성하기 위해 FULL SCAN 하는 과정에 블록 I/O가 많이 발생한다.
+ * 자칫 가용 PGA 공간이 가득차면, 그로 인한 성능 저하도 감수해야 한다.
+ * */ 
+
+/** [실행계획 - 1안 ] 해설
+ * 상품 인덱스를 [등록일시 + 상품코드] 또는 [상품코드 + 등록일시] 순으로 구성하고 모범답안 1안처럼 인라인 뷰 내에서 인덱스만 읽어서 해시 조인하면 정렬 기준인 등록일시를 빠르게 얻을 수 있다.
+ * 상품코드로 GROUP BY 하고 등록일시로 ORDER BY 까지 끝낸 집합을 기준으로 인덱스로 NL 조인하면, 앞쪽 일부(보통 100개) 상품만 읽으면 되기 때문에 효과적이다.  
+ * */
  
+/** TABLE ACCESS (BY INDEX ROWID) OF '상품' (TABLE)
+ *    NESTED LOOPS
+ * 		VIEW
+ * 		  SORT (ORDER BY)
+ * 			HASH (GROUP BY)
+ * 			  HASH JOIN
+ * 				INDEX (FAST FULL SCAN) OF '상품_X1' (INDEX)
+ * 				PARTITION RANGE (ITERATOR) 
+ * 				  TABLE ACCESS (FULL) OF '주문상품' (TABLE)
+ * 		INDEX (UNIQUE SCAN) OF '상품_PK' (INDEX (UNIQUE))
+ * */ 
  
+-- 모범답안 [SQL - 1안]
+SELECT /*+ LEADING(O) USE_NL(P) NO_NLJ_BATCHING(P) */
+	   P.상품코드, P.상품명, B.등록일시, P.상품가격, P.공급자ID
+	 , O.총주문수량, O.총주문금액
+  FROM (
+  	SELECT /*+ LEADING(B) USE_HASH(A) FULL(A) INDEX_FFS(B) */
+  		   A.상품코드, MIN(B.등록일시) 등록일시
+  		 , SUM(A.주문수량) 총주문수량, SUM(A.주문금액) 총주문금액
+  	  FROM 주문상품 A
+  	 	 , 상품 B
+  	 WHERE A.상품코드 = B.상품코드
+  	   AND A.주문일시 >= ADD_MONTHS(SYSDATE, -1)
+  	   AND A.할인유형코드 = 'K890'
+  	 GROUP BY A.상품코드
+  	 ORDER BY 등록일시 DESC
+  ) O, 상품 P
+ WHERE O.상품코드 = P.상품코드
  
+/** [실행계획 - 2안 ] 해설
+ * GROUP BY와 ORDER BY를 함께 사용한 인라인 뷰는 Merging 될 수 없으므로 NO_MERGE 힌트는 불필요하다.
+ * NL 조인 과정에 배치 I/O가 작동하면 출력 순서가 흐트러질 수 있으므로 NO_NLJ_BATCHING 힌트를 추가해야한다.
+ * 모범답안 2안처럼 인라인 뷰에서 상품_X1 인덱스와 해시 조인할 때 ROWID를 읽어서 상품 테이블과 다시 조인할 때 사용하는 방법도 있다.
+ * */ 
  
+/** NESTED LOOPS
+ * 	  VIEW
+ * 		SORT (ORDER BY)
+ * 		  HASH (GROUP BY)
+ * 			HASH JOIN
+ * 			  INDEX (FAST FULL SCAN) OF '상품_X1' (INDEX)
+ * 			  PARTITION RANGE (ITERATOR)
+ * 				TABLE ACCESS (FULL) OF '주문상품' (TABLE)
+ * 	  TABLE ACCESS (BY USER ROWID) OF '상품' (TABLE)
+ * */ 
  
+-- 모범답안 [SQL - 2안]
+SELECT /*+ LEADING(O) USE_NL(P) */
+	   P.상품코드, P.상품명, B.등록일시, P.상품가격, P.공급자ID
+	 , O.총주문수량, O.총주문금액
+  FROM (
+  	SELECT /*+ LEADING(B) USE_HASH(A) FULL(A) INDEX_FFS(B) */
+  		   A.상품코드, MIN(B.등록일시) 등록일시
+  		 , SUM(A.주문수량) 총주문수량, SUM(A.주문금액) 총주문금액
+  	  FROM 주문상품 A
+  	 	 , 상품 B
+  	 WHERE A.상품코드 = B.상품코드
+  	   AND A.주문일시 >= ADD_MONTHS(SYSDATE, -1)
+  	   AND A.할인유형코드 = 'K890'
+  	 GROUP BY A.상품코드
+  	 ORDER BY 등록일시 DESC
+  ) O, 상품 P
+ WHERE O.ROWID = P.ROWID 
  
+/** [인덱스 재구성]
+ * 상품_X1 : [등록일시 + 상품코드] 또는 [상품코드 + 등록일시]
+ * 주문상품_X1 : 할인유형코드 + 주문일시
+ * */ 
+------------------------------------------------------------------------- 
  
  
  
