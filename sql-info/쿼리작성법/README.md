@@ -1,4 +1,5 @@
 # 쿼리작성법
+### 쿼리는 Database의Framework
 
 1. 성능과 유지관리 고려
    - JOIN, ORDER BY, WITH ROLLUP 등
