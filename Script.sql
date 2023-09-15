@@ -1306,15 +1306,153 @@ SELECT Y.작업일련번호, Y.작업자ID, '장애' AS 작업구분, X.고객�
  * */  
 -------------------------------------------------------------------------
    
+--------------------------- 조인튜닝 57번 ---------------------------------- 
+/** 아래 데이터 모델에서 장비구분코드가 'A001'인 장비의 최종(=현재) 상태코드, 변경일자, 변경순번을 출력하는 최적 SQL
+ * - 장비구분코드 = 'A001'인 장비는 10건
+ * - 결과집합을 장비번호 순으로 정렬
+ * - 장비 테이블의 최종변경일시는 상태코드 변경과 무관
+ * - DBMS는 오라클이며, 12C 이후 버전임
+ * */ 
+/** [ 인덱스 구성 ]
+ * 장비_PK : [ 장비번호 ]
+ * 장비_X1 : [ 장비구분번호 ]
+ * 상태변경이력_PK : [ 장비번호 + 변경일자 + 변경순번 ]
+ * */
+
+-- 내 답안
+SELECT /* leading (A) use_nl(B) */
+	   A.장비번호, A.장비명, B.상태코드
+	 , TO_CHAR(B.변경일자, 'YYYYMMDD') 최종변경일자
+	 , B.변경순번
+  FROM (
+  	SELECT /* push_pred */
+  		   장비번호, 상태코드, MAX(변경일자) 변경일자
+  	  FROM 상태변경이력
+  	 GROUP BY 장비번호, 상태코드
+  ) B
+ WHERE A.장비번호 = B.장비번호
+ 
+/** 해설
+ * 11g 버전을 사용하고 있다면, 모범답안 1안은 아래와 같이 작성하면 된다.
+ * */
+SELECT P.장비번호, P.장비명, H.상태코드 AS 최종상태코드
+	 , H.변경일자 AS 최종변경일자, H.변경순번 AS 최종변경순번
+  FROM 장비 P, 상태변경이력 H
+ WHERE P.장비번호 = H.장비번호
+   AND P.장비구분코드 = 'A001'
+   AND (H.변경일자, H.변경순번) = (SELECT 변경일자, 변경순번
+   						  	    FROM (SELECT 장비번호, 변경일자, 변경순번 	
+   						  	   	   	    FROM 상태변경이력
+   						  	   	       ORDER BY 변경일자 DESC, 변경순번 DESC) 
+							   WHERE 장비번호 = P.장비번호
+							     AND ROWNUM <= 1)
+ ORDER BY P.장비번호
+ 
+/** ROWID를 이용한 아래 모범답안 2안은 상태변경이력_PK 인덱스를 한 번만 액세스하므로 약간 더 유리하긴 하지만, 
+ * 일반 개발자가 이해하기 쉽지 않은 패턴이어서 그다지 권장하고 싶지는 않다.
+ * 힌트를 사용하지 않았지만, ORDER BY 조건에 따라 인덱스를 역순으로 스캔한 사실을 확인하자.
+ * 아래와 같이 ORDER BY를 생략하고 INDEX_DESC 힌트를 명시하면 SQL은 좀 더 단순해지지만,
+ * 혹시라도 인덱스 구성이 변경되면 결과집합에 오류가 발생하므로 가급적 사용하지 않는 것이 좋다.
+ * (모범답안처럼 서브쿼리 내 인라인 뷰에서 메인쿼리 컬럼을 참조하면 ORA-00904에러가 발생하던 과거 버전에서 어쩔수 없이 사용하던 방식이다.)
+ * */   
+SELECT P.장비번호, P.장비명, H.상태코드 AS 최종상태코드
+	 , H.변경일자 AS 최종변경일자, H.변경순번 AS 최종변경순번
+  FROM 장비 P, 상태변경이력 H
+ WHERE P.장비구분코드 = 'A001'
+--   AND P.장비번호 = H.장비번호 -> 이 조인절은 없어도 무방
+   AND H.ROWID = (SELECT /*+ INDEX_DESC(H 상태변경이력_PK) */ 
+   						 ROWID
+   					FROM 상태변경이력 H
+   				   WHERE 장비번호 = P.장비번호
+     				 AND ROWNUM <= 1)
+ ORDER BY P.장비번호
+ 
+/** SORT (ORDER BY)
+ * 	  NESTED LOOPS
+ * 		TABLE ACCESS (BY INDEX ROWID) OF '장비'
+ * 		  INDEX (RANGE SCAN) OF '장비_X1'
+ * 		TABLE ACCESS (BY USER ROWID) OF '상태변경이력'
+ * 		  COUNT (STOPKEY)
+ * 			INDEX (RANGE SCAN DESCENDING) OF '상태변경이력_PK'
+ * */   
    
+-- 모범답안 [ SQL - 1안 ]
+SELECT P.장비번호, P.장비명, H.상태코드 AS 최종상태코드
+	 , H.변경일자 AS 최종변경일자, H.변경순번 AS 최종변경순번
+  FROM 장비 P, 상태변경이력 H
+ WHERE P.장비번호 = H.장비번호
+   AND P.장비구분코드 = 'A001'
+   AND (H.변경일자, H.변경순번) = 
+   	     (SELECT 변경일자, 변경순번
+   			FROM (SELECT 장비번호, 변경일자, 변경순번 	
+   					FROM 상태변경이력
+   				   ORDER BY 변경일자 DESC, 변경순번 DESC) 
+		   WHERE 장비번호 = P.장비번호
+			 AND ROWNUM <= 1)
+ ORDER BY P.장비번호   
    
+/** SORT (ORDER BY)
+ * 	  NESTED LOOPS
+ * 		NESTED LOOPS
+ * 		  TABLE ACCESS (BY INDEX ROWID) OF '장비'
+ * 			INDEX (RANGE SCAN) OF '장비_X1'
+ * 		  INDEX (UNIQUE SCAN) OF '상태변경이력_PK'
+ * 			COUNT (STOPKEY)
+ * 			  VIEW 
+ * 				INDEX (RANGE SCAN DESCENDING) OF '상태변경이력_PK'
+ * 		TABLE ACESS (BY INDEX ROWID) OF '상태변경이력'
+ * */   
    
+-- 모범답안 [ SQL - 2안 ]
+SELECT P.장비번호, P.장비명, H.상태코드 AS 최종상태코드
+	 , H.변경일자 AS 최종변경일자, H.변경순번 AS 최종변경순번
+  FROM 장비 P, 상태변경이력 H
+ WHERE P.장비구분코드 = 'A001'
+--   AND P.장비번호 = H.장비번호 -> 이 조인절은 없어도 무방
+   AND H.ROWID = 
+   		 (SELECT RID
+   		    FROM (SELECT ROWID AS RID
+   					FROM 상태변경이력 
+   				   WHERE 장비번호 = P.장비번호
+   				   ORDER BY 변경일자 DESC, 변경순번 DESC)
+     	   WHERE ROWNUM <= 1)
+ ORDER BY P.장비번호   
    
-   
-   
-   
-   
-   
-   
-   
-   
+/** SORT (ORDER BY)
+ * 	  NESTED LOOPS
+ * 		TABLE ACCESS (BY INDEX ROWID) OF '장비'
+ * 		  INDEX (RANGE SCAN) OF '장비_X1'
+ * 		TABLE ACCESS (BY USER ROWID) OF '상태변경이력'
+ * 		  COUNT (STOPKEY)
+ * 			VIEW
+ * 			  INDEX (RANGE SCAN DESCENDING) OF '상태변경이력_PK'
+ * */   
+-------------------------------------------------------------------------   
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
