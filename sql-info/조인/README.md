@@ -66,6 +66,12 @@
 	2. NULL 값 생성 이해
 	3. FULL OUTER JOIN 이해
 
-
+7. Self 조인과 Non-equal(equi)조인
+    - 일반 조인은
+	- 부모-자식 관계
+	- Equi(=) 조건으로 결합
+    - 예외
+	- 자기 자신과 조인
+	- Equi가 아닌 조건 필요
 
 
