@@ -1,5 +1,5 @@
 # 서브쿼리
-1. Subquery
+### Subquery
     - 유형
       - 중첩(Nested Scalar) - 단독 실행 가능한 형태
       - 상관(Correlated) - 외부 테이블 열 참조
@@ -15,7 +15,7 @@
         - 조인 기능 자체 한계 해결 - 파생테이블, CTE, APPLY
 
 
-2. 중첩 (Scalar) 서브쿼리
+### 중첩 (Scalar) 서브쿼리
    - 주요 구문
      - SELECT 절
        - 비교 연산자 (=, <, >, etc.)
@@ -30,9 +30,21 @@
        - 주의사항 
          - Null 값 포함 시 정합성 문제 주의
          - NOT IN (NULL) 값 참조되지 않도록 주의
+	 - 내부 쿼리에 없는 외부 테이블 열 참조시
+	   - 특히 Insert/Update/Delete와 결합되는 경우 주의
+	   - 따라서 쿼리 작성 시 "테이블 별칭.열이름" 방식 권장
 
+### 상관(Correlated) 서브쿼리
+    - 주요 구문
+      - SELECT 절
+      - WHERE 조건
+	- 비교 연산자
+	- IN, NOT IN
+	- EXISTS, NOT EXISTS
+      - HAVING <검색_조건>
+      - APPLY 연산자 
 
-3. CTE(Common Table Expression)(공통 테이블 식)
+### CTE(Common Table Expression)(공통 테이블 식)
     - 기능
       - 테이블 식(파생테이블 + 뷰 장점)
       - 재귀(Recursive) CTE
