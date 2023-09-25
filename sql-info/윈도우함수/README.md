@@ -14,8 +14,8 @@ FUNCTION()
 OVER   
 (   
   [ <[window partition clause]> ]   
-  [ <window order clause> ]   
-  [ <window frame clause> ]   
+  [ <[window order clause]> ]   
+  [ <[window frame clause]> ]   
 )   
   - 1) PARTITION BY - Windows 범위 (기본은 전체 행)
   - 2) ORDER BY - 연산 & (이동/누적) 대상 열
