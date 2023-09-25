@@ -7,3 +7,16 @@
   - 디폴트는 ALL
   - DISTINCT는 개별 고유 값을 정의하고 집계 연산
 6. 산술 Overflow 오류와 COUNT_BIG() 
+
+
+### OVER() 이해 - Window(Partition), Order, Frame 정의
+FUNCTION()   
+OVER   
+(   
+  [ <window partition clause> ]   
+  [ <window order clause> ]   
+  [ <window frame clause> ]   
+)   
+  - 1) PARTITION BY - Windows 범위 (기본은 전체 행)
+  - 2) ORDER BY - 연산 & (이동/누적) 대상 열
+  - 3) (이동/누적) 범위 (기본은 Range) 
