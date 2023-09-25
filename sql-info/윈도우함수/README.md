@@ -13,7 +13,7 @@
 FUNCTION()   
 OVER   
 (   
-  [ <window partition clause> ]   
+  [ \window partition clause\ ]   
   [ <window order clause> ]   
   [ <window frame clause> ]   
 )   
