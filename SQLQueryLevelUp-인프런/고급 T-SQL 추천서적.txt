@@ -1,0 +1,7 @@
+Inside Microsoft SQL Server T-SQL Querying
+Inside Microsoft SQL Server T-SQL Programming
+Advanced Transact-SQL for SQL Server 2000
+
+(번역)Transact SQL, 켄 헨더슨
+(국내)Deep Inside T-SQL (품절)
+(국내)실무를 고려한 SQL Server Advanced Programming (절판)

@@ -1,0 +1,4 @@
+SSMS에서 아래 스크립트 열어서 전체 실행
+
+- SampleDB-Northwind.sql
+- SampleDB-Pubs.sql
