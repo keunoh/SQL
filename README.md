@@ -318,13 +318,27 @@
 
 ---
 # DML
+- 테이블 값 생성자 VALUES()
+- SELECT INTO
+- INSERT EXEC
+- UPDATE SET 절 고급 활용
+- DML + OUTPUT 절
+- Composable DML
+- MERGE
+- 사용자 채번 코드
+- SEQUENCE 개체
+
 1. 테이블 값 생성자 - VALUES
-    - 기능
-        - 행 집합 선언 후 테이블 입력으로 사용
-    - 구현
-        - FROM () 파생 테이블
-        - INSERT ... VALUES
-        - MERGE 문의 USING
+   - 기능
+       - 행 집합 선언 후 테이블 입력으로 사용
+   - 구현
+       - FROM () 파생 테이블
+       - INSERT ... VALUES
+       - MERGE 문의 USING
+   - 예제
+     - 가상 테이블 데이터 구성 - Live 데모
+     - INSERT용 다중 레코드 값 정의
+     - 행 복제를 위한 조인용 Copy 테이블
 2. INSERT/UPDATE/DELETE + TOP
     - 기능
         - DML 작업에 데이터 개수 제한
