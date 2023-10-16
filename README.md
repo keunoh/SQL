@@ -344,6 +344,7 @@
         - DML 작업에 데이터 개수 제한
         - 비율이나 수식(쿼리)으로 지정 가능
     - 구현 / 예제
+        - TOP (expression) [ PERCENT ] 
         - DML + TOP(n)
         - DML + TOP(n) PERCENT
         - DML + 파생테이블(or CTE)
@@ -357,6 +358,10 @@
    - 사례
        - 채번 로직에서 기존 UPDATE + SELECT 코드 개선
    - 예제
+       - UPDATE 
+         - SET  
+           - @variable = expression
+           - @variable = column = expression
        - 기본 활용 예
        - 열 값 상호교환(Swapping)
            - 기본 공식 vs. 단순 방법
@@ -364,6 +369,11 @@
 4. INSERT/UPDATE/DELETE/MERGE + OUTPUT 절 (SQL SERVER)
    - 기능
        - 변경 (전/후) 행 데이터 반환
+   - 구현
+     - OUTPUT <dml_select_list>
+     - OUTPUT <dml_select_list> INTO {@table_variable | output_table } [(column_list)]
+     - <dml_select_list :: =
+     - { DELETED | INSERTED | from_table_name }.{* | column_name } | $action
    - 용도
        - 단순 결과 데이터 반환
        - 테이블 입력 후 재활용
@@ -387,6 +397,12 @@
        - EXEC 문과 INSERT 결합
            - 입력 테이블은 존재하는 상태로
        - 저장 프로시저 혹은 동적 쿼리 결과를 입력
+   - 구현
+     - INSERT table_name
+     - {
+       - EXEC procedure_name
+       - | EXEC ('query_string')
+     - }
    - 예제
        - 저장 프로시저 실행 결과 저장
 
