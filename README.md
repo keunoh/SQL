@@ -406,6 +406,52 @@
    - 예제
        - 저장 프로시저 실행 결과 저장
 
+7. MERGE
+   - 기능
+     - 일명 UPSERT
+     - 단일 문으로 INSERT, UPDATE, DELETE 수행
+       - 필요에 따라 동일 action에 다른 DML 처리 가능
+     - Target 테이블과 Source 테이블간의 조인 기준
+   - 예제
+     - 1. 단순 I/U/D/ - 데이터 동기화
+     - 2. 중복 소스를 가지는 경우에 처리
+     - 3. Delta(증분)값 처리하는 경우
+     - 4. 채번 (기존 방식 대체)
+   - 구문
+     - [ WITH <common_table_expression> [,...n]]
+     - MERGE
+       - [ TOP (expression) [ PERCENT ]]
+       - [ INTO ] <target_table> [ WITH (<merge_hint>) ][[ AS ] table_alias]
+       - USING <table_source>
+         - ON <merge_search_condition>
+       - [ WHEN MATCHED [ AND <clause_search_condition> ]
+         - THEN <merge_matched> ] [...n]
+       - [ WHEN NOT MATCHED [ BY TARGET ] [ AND <clause_search_condition>]
+         - THEN <merge_not_matched> ]
+       - [ WHEN NOT MATCHED BY SOURCE [ AND <clause_search_condition>]
+         - THEN <merge_matched> ] [...n]
+       - [ <output_clause> ]
+       - [ OPTION ( <query_hint> [,...n])]
+   - (사용자 정의) 채번 코드와 MERGE
+     - 채번
+       - 한국의 IT 용어?
+       - 풀이 - "고유 식별 번호 생성"
+     - 사용자 정의 채번 논리 구현
+       - 기존 방식
+         - 1. 조건부 (IF Exists) UPDATE/INSERT
+         - 2. UPDATE 후 (IF @@ROWCOUNT = 0) INSERT
+       - MERGE 방식
+         - 3. WHEN MATCHED/WHEN NOT MATCHED
+     - 주의 사항
+       - 동시 INSERT 시 증복 키 오류 발생 가능
+         - 일명 "Race Condition"
+   - 주의 - 온라인 설명 참조
+     - @@ROWCOUNT는 행의 총 개수를 반환
+     - 테이블에 Trigger 정의된 경우 호출
+     - ON <merge_search_condition> 절
+       - 매칭(조인) 조건만 기술할 것(BOL에서 "caution" 부분 확인)
+       - 대상 테이블에 필터링 조건 지정 시 잘못된 결과 가능
+         - (추가의견) 원본 테이블도 동일
 ---
 # Sequence
 1. 특징
