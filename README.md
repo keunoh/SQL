@@ -327,6 +327,10 @@
 - MERGE
 - 사용자 채번 코드
 - SEQUENCE 개체
+- 임시 Table과 Table 변수
+- 동적 SQL과 sq_executesql
+- 동적 검색(만능 조회) 쿼리 예제
+- 배열(or Table) 값 넘기기 - Split() vs. UDT와 TVP vs. STRING_SPLIT()
 
 1. 테이블 값 생성자 - VALUES
    - 기능
@@ -452,23 +456,58 @@
        - 매칭(조인) 조건만 기술할 것(BOL에서 "caution" 부분 확인)
        - 대상 테이블에 필터링 조건 지정 시 잘못된 결과 가능
          - (추가의견) 원본 테이블도 동일
----
-# Sequence
-1. 특징
-    - 독립 개체로 생성
-        - 순번의 중앙 저장소 - DB 단위
-        - 디폴트 타입은 bigint
-    - Caching 사용자 정의
-    - 단점
-        - 관리 이슈 발생
-        - IDENTITIY와 동일 활용 시 테이블 단위 개체 필요
-    - 적용 시나리오
-        - 여러 테이블에 공유되는 고유 순번
-        - 지정 번호 도달 시 다시 시작 필요한 경우(Cycling)
-        - 순번의 조정/변경이 자유로워야 하는 경우
-        - 시퀀스 값을 다른 열을 기준으로 정렬해야하는 경우
-            - NEXT VALUE FOR OVER()절 사용 가능 (Window Function)
 
+8. Sequence
+   - 특징
+       - 독립 개체로 생성
+           - 순번의 중앙 저장소 - DB 단위
+           - 디폴트 타입은 bigint
+       - Caching 사용자 정의
+       - 단점
+           - 관리 이슈 발생
+           - IDENTITIY와 동일 활용 시 테이블 단위 개체 필요
+       - 적용 시나리오
+           - 여러 테이블에 공유되는 고유 순번
+           - 지정 번호 도달 시 다시 시작 필요한 경우(Cycling)
+           - 순번의 조정/변경이 자유로워야 하는 경우
+           - 시퀀스 값을 다른 열을 기준으로 정렬해야하는 경우
+               - NEXT VALUE FOR OVER()절 사용 가능 (Window Function)
+
+9. 임시 Table(or 변수) 활용
+   - 유용한 경우
+     - 동일 행(들)에 대한 중복/반복/집계 처리 필요한 경우
+       - 예. 그룹웨어 Main 페이지, ERP 마감작업 등
+     - 중간 결과 저장과 재사용
+     - Cursor 대체용
+       - 재귀 호출(순환 관계 모델-Tree) 처리
+     - 대량 조인 /UNION /집계 쿼리 단순화
+     - 다른 대체 방법이 없는 경우
+     - 기타 SQL Server 내부적으로 사용
+       - MTF(Multi statement Table-valued Function)
+       - TVP(Table Valued Parameter)
+  - 임시 Table vs. Table 변수
+    - 특징
+      - tempdb에 물리적으로 저장
+        - `#` - Local Temp Table(현재 세션 용)
+        - `##` - Global Temp Table(전체 세션 공유)
+        - `@` - Table Variable (현재 Batch 용)
+    - Table 변수는
+      - PK/UNIQUE 생성 지원
+      - 기타 인덱스는 비 지원
+      - FK 제약조건은 선언만 가능
+      - CHECK 제약조건 지원
+  - 예제 - 임시 Table과 Table 변수
+    - 로컬 임시 테이블
+      - 인덱스 생성
+      - 개체 정보 확인 방법
+    - 전역 임시 테이블
+      - 참조 범위 확인
+      - 삭제 시점
+    - 테이블 변수
+      - IDENTITY/PK/UNIQUE 확인
+      - DEFAULT, CHECK 제약 조건 확인
+    - 고객별 5번째 주문금액에 할인 제공
+    - 중복 행에서 한 행만 남기고 나머지 삭제하기
 ---
 # 집계(Aggregate)함수 특성 이해를 위한 예제
 1. COUNT(expression) vs. 다른 집계 함수
